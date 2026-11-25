@@ -93,8 +93,15 @@ jobs:
 
       - name: Export oas-runtime.zip from upstream OAS
         run: |
-          mkdir -p upstream-oas/toolkit/Lib/site-packages
-          pip install --no-deps --target upstream-oas/toolkit/Lib/site-packages ppocronnx paho-mqtt onepush
+          SITE=upstream-oas/toolkit/Lib/site-packages
+          mkdir -p "$SITE"
+          # PyPI 上的真名是 ppocr-onnx（装完目录名才是 ppocronnx）、paho-mqtt（目录名 paho）。
+          # 原写法 `pip install ppocronnx` 在 PyPI 查无此包，pip 立即 404 退出（run 45601975265，1 秒失败）。
+          pip install --no-deps --target "$SITE" "ppocr-onnx==0.0.3.9" "paho-mqtt==1.6.1" "onepush==1.3.0"
+          for pkg in ppocronnx paho onepush; do
+            [ -d "$SITE/$pkg" ] || { echo "::error::missing $SITE/$pkg after pip install"; exit 1; }
+          done
+          ls "$SITE" | head -20
           python3 tools/export-runtime.py --source upstream-oas
 
       - name: Decode release signing keystore (if configured)

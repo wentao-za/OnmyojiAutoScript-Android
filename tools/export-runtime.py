@@ -27,7 +27,10 @@ for folder in ('module','tasks','assets','deploy'):
             entries[path.relative_to(source).as_posix()]=path
 for filename in ('LICENSE','LICENSE.txt','script.py','config/deploy.template.yaml'):
     if (source/filename).is_file():entries[filename]=source/filename
-entries['dev_tools/assets_test.py']=source/'dev_tools/assets_test.py'
+assets_test=source/'dev_tools/assets_test.py'
+# 上游 kongdr418/OnmyojiAutoScript 的 dev_tools/ 只有 settings_ui_checks.js，
+# 没有 assets_test.py（该文件属于本地开发副本）。缺失时跳过，不影响运行时。
+if assets_test.is_file():entries['dev_tools/assets_test.py']=assets_test
 site=source/'toolkit/Lib/site-packages'
 for package in ('ppocronnx','paho','onepush'):
     for path in sorted((site/package).rglob('*')):
@@ -35,15 +38,16 @@ for package in ('ppocronnx','paho','onepush'):
             entries[path.relative_to(site).as_posix()]=path
 manifest=[]
 imports=set()
+# These two upstream imports are unused by the actual task classes and
+# otherwise initialize PC-only backends. Record each source edit below.
+# 定义在循环外：收集到 0 个文件时循环不执行，仍要能写出 manifest。
+removed_imports={
+    'tasks/Component/SwitchAccount/switch_account.py':b'from adbutils import device',
+    'tasks/Quiz/script_task.py':b'from module.device.screenshot import Screenshot',
+}
 with zipfile.ZipFile(destination/'oas-runtime.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as archive:
     for name,path in entries.items():
         data=path.read_bytes()
-        # These two upstream imports are unused by the actual task classes and
-        # otherwise initialize PC-only backends. Record each source edit below.
-        removed_imports={
-            'tasks/Component/SwitchAccount/switch_account.py':b'from adbutils import device',
-            'tasks/Quiz/script_task.py':b'from module.device.screenshot import Screenshot',
-        }
         if name in removed_imports:data=data.replace(removed_imports[name],b'# Android: unused desktop-only import removed')
         archive.writestr(name,data)
         manifest.append(dict(path=name,size=len(data),sha256=hashlib.sha256(data).hexdigest()))
