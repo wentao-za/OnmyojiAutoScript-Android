@@ -48,20 +48,48 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Setup Android SDK & NDK
-        uses: android-actions/setup-android@v3
+      # 不用 android-actions/setup-android@v3：它是 Node 20 时代的 action，
+      # 已被强制在 Node 24 上运行并在 runner 上直接失败（run 45600288196 实测）。
+      # ubuntu-latest 本身预装 Android SDK，这里只做定位 + 兜底下载。
+      - name: Setup Android SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SM" ]; then SM="$(command -v sdkmanager || true)"; fi
+          if [ -z "$SM" ] || [ ! -x "$SM" ]; then
+            echo "cmdline-tools not found, downloading official package"
+            mkdir -p "$SDK/cmdline-tools"
+            curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/cmdline-tools.zip -d "$SDK/cmdline-tools"
+            rm -rf "$SDK/cmdline-tools/latest"
+            mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+            SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "SM=$SM" >> "$GITHUB_ENV"
+          echo "sdkmanager: $SM"
+          "$SM" --version
 
       - name: Install required Android SDK components
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
-          # Ensure compileSdk 37 is installed if available
-          sdkmanager "platforms;android-37" || true
+          yes | "$SM" --licenses >/dev/null || true
+          # SDK 37 已改为版本化命名（android-37.0 / 37.1 / 37.2），不存在裸 android-37
+          "$SM" "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.2.12479018"
+          "$SM" "platforms;android-37" || echo "bare android-37 not published, will alias versioned platform instead"
+          # 让按裸名查找的 AGP 能命中：platforms/android-37 -> android-37.0
+          if [ -d "$ANDROID_SDK_ROOT/platforms/android-37.0" ] && [ ! -e "$ANDROID_SDK_ROOT/platforms/android-37" ]; then
+            ln -s android-37.0 "$ANDROID_SDK_ROOT/platforms/android-37"
+            echo "aliased platforms/android-37 -> android-37.0"
+          fi
+          ls "$ANDROID_SDK_ROOT/platforms"
+          ls "$ANDROID_SDK_ROOT/ndk"
 
       - name: Build native raw_frames library
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
-        run: sh tools/build-frames.sh
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/27.2.12479018"
+          echo "using NDK: $ANDROID_NDK_HOME"
+          sh tools/build-frames.sh
 
       - name: Export oas-runtime.zip from upstream OAS
         run: |
